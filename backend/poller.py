@@ -82,8 +82,9 @@ async def poll_feed(feed: dict):
             continue
         tasks.append(_process_entry(entry, feed))
         new_count += 1
-    if tasks:
-        await asyncio.gather(*tasks)
+    for task in tasks:
+        await task
+        await asyncio.sleep(5)  # stay within free tier rate limit (15 RPM)
     if new_count:
         logger.info(f"{feed['name']}: {new_count} new articles")
 
@@ -114,5 +115,6 @@ async def _process_entry(entry, feed: dict):
 
 async def poll_all():
     logger.info("Starting poll cycle")
-    await asyncio.gather(*[poll_feed(f) for f in KENYA_FEEDS])
+    for feed in KENYA_FEEDS:
+        await poll_feed(feed)
     logger.info("Poll cycle complete")

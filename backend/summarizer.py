@@ -37,7 +37,7 @@ async def summarize(title: str, body: str, source: str) -> dict | None:
     )
     try:
         response = get_client().models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-1.5-flash",
             contents=prompt,
         )
         text = response.text.strip()
