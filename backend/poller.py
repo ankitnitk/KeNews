@@ -1,27 +1,30 @@
 import asyncio
 import feedparser
 import httpx
+import logging
+import os
+import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
 
 from feeds import KENYA_FEEDS
 from db import insert_article, article_exists
 from summarizer import summarize
 
+logger = logging.getLogger("kenews.poller")
+
 
 def _extract_image(entry) -> str | None:
-    # Try media:content
     if hasattr(entry, "media_content") and entry.media_content:
         return entry.media_content[0].get("url")
-    # Try enclosures
     if hasattr(entry, "enclosures") and entry.enclosures:
         for enc in entry.enclosures:
             if enc.get("type", "").startswith("image"):
                 return enc.get("href") or enc.get("url")
-    # Try og:image via summary html
-    if "<img" in getattr(entry, "summary", ""):
-        import re
-        m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', entry.summary)
+    summary = getattr(entry, "summary", "")
+    if "<img" in summary:
+        m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', summary)
         if m:
             return m.group(1)
     return None
@@ -37,33 +40,31 @@ def _parse_date(entry) -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class _TextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.chunks = []
+        self._skip = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style", "nav", "header", "footer"):
+            self._skip = True
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style", "nav", "header", "footer"):
+            self._skip = False
+
+    def handle_data(self, data):
+        if not self._skip and data.strip():
+            self.chunks.append(data.strip())
+
+
 async def _fetch_article_text(url: str) -> str:
-    """Best-effort fetch of article body text."""
     try:
         async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
             r = await client.get(url, headers={"User-Agent": "KeNews/1.0"})
             if r.status_code == 200:
-                from html.parser import HTMLParser
-
-                class TextExtractor(HTMLParser):
-                    def __init__(self):
-                        super().__init__()
-                        self.chunks = []
-                        self._skip = False
-
-                    def handle_starttag(self, tag, attrs):
-                        if tag in ("script", "style", "nav", "header", "footer"):
-                            self._skip = True
-
-                    def handle_endtag(self, tag):
-                        if tag in ("script", "style", "nav", "header", "footer"):
-                            self._skip = False
-
-                    def handle_data(self, data):
-                        if not self._skip and data.strip():
-                            self.chunks.append(data.strip())
-
-                p = TextExtractor()
+                p = _TextExtractor()
                 p.feed(r.text)
                 return " ".join(p.chunks)
     except Exception:
@@ -72,16 +73,19 @@ async def _fetch_article_text(url: str) -> str:
 
 
 async def poll_feed(feed: dict):
-    print(f"[poller] polling {feed['name']}")
     parsed = feedparser.parse(feed["url"])
+    new_count = 0
     tasks = []
     for entry in parsed.entries[:int(os.environ.get("MAX_ARTICLES_PER_FEED", 10))]:
         url = entry.get("link", "")
         if not url or await article_exists(url):
             continue
         tasks.append(_process_entry(entry, feed))
+        new_count += 1
     if tasks:
         await asyncio.gather(*tasks)
+    if new_count:
+        logger.info(f"{feed['name']}: {new_count} new articles")
 
 
 async def _process_entry(entry, feed: dict):
@@ -96,26 +100,19 @@ async def _process_entry(entry, feed: dict):
     if not result:
         return
 
-    image_url = _extract_image(entry)
-    now = datetime.now(timezone.utc).isoformat()
-
     await insert_article({
         "url": url,
         "title": title,
         "summary": result["summary"],
         "category": result["category"],
         "source": feed["name"],
-        "image_url": image_url,
+        "image_url": _extract_image(entry),
         "published_at": _parse_date(entry),
-        "fetched_at": now,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
     })
-    print(f"[poller] saved: {title[:60]}")
 
 
 async def poll_all():
-    import os
-    tasks = [poll_feed(f) for f in KENYA_FEEDS]
-    await asyncio.gather(*tasks)
-
-
-import os
+    logger.info("Starting poll cycle")
+    await asyncio.gather(*[poll_feed(f) for f in KENYA_FEEDS])
+    logger.info("Poll cycle complete")
