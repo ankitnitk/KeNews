@@ -1,43 +1,44 @@
-import anthropic
 import os
+import json
+import google.generativeai as genai
 from feeds import CATEGORIES
 
-_client: anthropic.AsyncAnthropic | None = None
+_model = None
 
 
-def get_client() -> anthropic.AsyncAnthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    return _client
+def get_model():
+    global _model
+    if _model is None:
+        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+        _model = genai.GenerativeModel("gemini-1.5-flash")
+    return _model
 
 
-SYSTEM_PROMPT = f"""You are a news editor for KeNews, a Kenya-focused news app.
-Given a news article, you will:
-1. Detect if it's in Swahili or English (translate mentally if Swahili)
-2. Write a crisp 60-word English summary in active voice, present tense where possible
-3. Assign exactly one category from: {", ".join(CATEGORIES)}
+PROMPT_TEMPLATE = """You are a news editor for KeNews, a Kenya-focused news app.
+Given the article below, do two things:
+1. Write a crisp 60-word English summary in active voice (translate from Swahili if needed)
+2. Assign exactly one category from: {categories}
 
-Respond ONLY with valid JSON in this exact format:
-{{
-  "summary": "60-word summary here",
-  "category": "CategoryName"
-}}"""
+Respond ONLY with valid JSON, no markdown, no explanation:
+{{"summary": "...", "category": "..."}}
+
+Source: {source}
+Title: {title}
+
+Article:
+{body}"""
 
 
 async def summarize(title: str, body: str, source: str) -> dict | None:
-    """Returns dict with 'summary' and 'category', or None on failure."""
-    content = f"Source: {source}\nTitle: {title}\n\nArticle:\n{body[:3000]}"
+    prompt = PROMPT_TEMPLATE.format(
+        categories=", ".join(CATEGORIES),
+        source=source,
+        title=title,
+        body=body[:3000],
+    )
     try:
-        message = await get_client().messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": content}],
-        )
-        import json
-        text = message.content[0].text.strip()
-        # Strip markdown code fences if present
+        response = get_model().generate_content(prompt)
+        text = response.text.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
