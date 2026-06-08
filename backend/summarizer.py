@@ -1,17 +1,16 @@
 import os
 import json
-import google.generativeai as genai
+from google import genai
 from feeds import CATEGORIES
 
-_model = None
+_client = None
 
 
-def get_model():
-    global _model
-    if _model is None:
-        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-        _model = genai.GenerativeModel("gemini-1.5-flash-8b")
-    return _model
+def get_client():
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    return _client
 
 
 PROMPT_TEMPLATE = """You are a news editor for KeNews, a Kenya-focused news app.
@@ -37,7 +36,10 @@ async def summarize(title: str, body: str, source: str) -> dict | None:
         body=body[:3000],
     )
     try:
-        response = get_model().generate_content(prompt)
+        response = get_client().models.generate_content(
+            model="gemini-2.0-flash-lite",
+            contents=prompt,
+        )
         text = response.text.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
