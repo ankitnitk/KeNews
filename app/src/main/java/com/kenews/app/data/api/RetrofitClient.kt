@@ -7,7 +7,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 object RetrofitClient {
     // Change to your deployed backend URL for release builds
-    private const val BASE_URL = "http://10.0.2.2:8000/"  // localhost via Android emulator
+    private const val BASE_URL = "https://kenews-production.up.railway.app/"
 
     val api: NewsApi by lazy {
         val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
