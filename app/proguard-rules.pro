@@ -1,0 +1,3 @@
+-keep class com.kenews.app.data.api.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*

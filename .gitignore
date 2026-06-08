@@ -1,0 +1,14 @@
+# Backend
+backend/.env
+backend/kenews.db
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+
+# Android
+.gradle/
+app/build/
+build/
+*.iml
+.idea/
+local.properties
