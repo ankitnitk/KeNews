@@ -18,11 +18,11 @@ scheduler = AsyncIOScheduler()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    # Initial poll on startup
-    await poll_all()
     # Schedule recurring polls
     interval = int(os.environ.get("POLL_INTERVAL_MINUTES", 30))
     scheduler.add_job(poll_all, "interval", minutes=interval)
+    # Run initial poll in background so server starts immediately
+    scheduler.add_job(poll_all, "date")
     scheduler.start()
     yield
     scheduler.shutdown()
