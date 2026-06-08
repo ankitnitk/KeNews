@@ -20,7 +20,7 @@ Article:
 
 async def summarize(title: str, body: str, source: str) -> dict | None:
     api_key = os.environ["GEMINI_API_KEY"]
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
+    url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
     prompt = PROMPT_TEMPLATE.format(
         categories=", ".join(CATEGORIES),
         source=source,
@@ -30,7 +30,7 @@ async def summarize(title: str, body: str, source: str) -> dict | None:
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(url, json=payload)
+            r = await client.post(url, params={"key": api_key}, json=payload)
             r.raise_for_status()
             text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
             if text.startswith("```"):
