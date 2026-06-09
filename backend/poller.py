@@ -84,7 +84,7 @@ async def poll_feed(feed: dict):
         new_count += 1
     for task in tasks:
         await task
-        await asyncio.sleep(5)  # stay within free tier rate limit (15 RPM)
+        await asyncio.sleep(10)  # stay within free tier rate limit (15 RPM = 1 req/4s, use 10s to be safe)
     if new_count:
         logger.info(f"{feed['name']}: {new_count} new articles")
 
