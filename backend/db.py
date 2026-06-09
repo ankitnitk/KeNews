@@ -1,15 +1,22 @@
-import aiosqlite
-import json
-from pathlib import Path
+import os
+import asyncpg
 
-DB_PATH = Path(__file__).parent / "kenews.db"
+_pool = None
+
+
+async def get_pool():
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], ssl="require")
+    return _pool
 
 
 async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS articles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 url TEXT UNIQUE NOT NULL,
                 title TEXT NOT NULL,
                 summary TEXT NOT NULL,
@@ -20,33 +27,25 @@ async def init_db():
                 fetched_at TEXT NOT NULL
             )
         """)
-        await db.commit()
 
 
 async def insert_article(article: dict) -> bool:
-    """Returns True if inserted, False if already exists."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
         try:
-            await db.execute(
+            await conn.execute(
                 """
                 INSERT INTO articles
                     (url, title, summary, category, source, image_url, published_at, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                ON CONFLICT (url) DO NOTHING
                 """,
-                (
-                    article["url"],
-                    article["title"],
-                    article["summary"],
-                    article["category"],
-                    article["source"],
-                    article.get("image_url"),
-                    article["published_at"],
-                    article["fetched_at"],
-                ),
+                article["url"], article["title"], article["summary"],
+                article["category"], article["source"], article.get("image_url"),
+                article["published_at"], article["fetched_at"],
             )
-            await db.commit()
             return True
-        except aiosqlite.IntegrityError:
+        except Exception:
             return False
 
 
@@ -55,32 +54,23 @@ async def get_articles(
     limit: int = 30,
     offset: int = 0,
 ) -> list[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    pool = await get_pool()
+    async with pool.acquire() as conn:
         if category and category.lower() != "all":
-            cursor = await db.execute(
-                """
-                SELECT * FROM articles
-                WHERE category = ?
-                ORDER BY published_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (category, limit, offset),
+            rows = await conn.fetch(
+                "SELECT * FROM articles WHERE category=$1 ORDER BY published_at DESC LIMIT $2 OFFSET $3",
+                category, limit, offset,
             )
         else:
-            cursor = await db.execute(
-                """
-                SELECT * FROM articles
-                ORDER BY published_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (limit, offset),
+            rows = await conn.fetch(
+                "SELECT * FROM articles ORDER BY published_at DESC LIMIT $1 OFFSET $2",
+                limit, offset,
             )
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
+        return [dict(r) for r in rows]
 
 
 async def article_exists(url: str) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("SELECT 1 FROM articles WHERE url = ?", (url,))
-        return await cursor.fetchone() is not None
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT 1 FROM articles WHERE url=$1", url)
+        return row is not None
