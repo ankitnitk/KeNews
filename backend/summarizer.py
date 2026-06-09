@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 import httpx
 from feeds import CATEGORIES
 
@@ -28,16 +29,23 @@ async def summarize(title: str, body: str, source: str) -> dict | None:
         body=body[:3000],
     )
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(url, headers={"X-goog-api-key": api_key}, json=payload)
-            r.raise_for_status()
-            text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            return json.loads(text.strip())
-    except Exception as e:
-        print(f"[summarizer] error: {e}")
-        return None
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.post(url, headers={"X-goog-api-key": api_key}, json=payload)
+                if r.status_code == 429:
+                    wait = 60 * (attempt + 1)  # 60s, 120s, 180s
+                    print(f"[summarizer] 429 rate limit, waiting {wait}s...")
+                    await asyncio.sleep(wait)
+                    continue
+                r.raise_for_status()
+                text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if text.startswith("```"):
+                    text = text.split("```")[1]
+                    if text.startswith("json"):
+                        text = text[4:]
+                return json.loads(text.strip())
+        except Exception as e:
+            print(f"[summarizer] error: {e}")
+            return None
+    return None
